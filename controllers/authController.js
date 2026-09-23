@@ -8,7 +8,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secreto_super_seguro_123';
 // Registro de Usuario
 exports.register = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    const { username, email, password, gamertag, class: userClass, region, level } = req.body;
 
     // Verificar si el usuario o email ya existe
     const existingUser = await User.findOne({ $or: [{ email }, { username }] });
@@ -22,9 +22,8 @@ exports.register = async (req, res) => {
 
     // Crear y guardar el usuario
     const newUser = new User({
-      username,
-      email,
-      password: hashedPassword
+      username, email, password: hashedPassword,
+      gamertag, class: userClass, region, level
     });
 
     await newUser.save();
