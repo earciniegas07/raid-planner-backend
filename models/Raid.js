@@ -12,7 +12,8 @@ const raidSchema = new mongoose.Schema({
   assignments: [{
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     tacticalRole: { type: String },
-    source: { type: String, enum: ['auto', 'manual'], default: 'auto' }
+    source: { type: String, enum: ['auto', 'manual'], default: 'auto' },
+    attendance: { type: String, enum: ['Pending', 'Confirmed', 'Declined'], default: 'Pending' }
   }]
 }, { timestamps: true });
 module.exports = mongoose.model('Raid', raidSchema);

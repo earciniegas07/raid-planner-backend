@@ -55,7 +55,6 @@ const createRaid = async (req, res) => {
   }
 };
 
-// Espejo de changeRaidState del frontend
 const changeRaidState = async (req, res) => {
   const { newState } = req.body;
   try {
@@ -89,9 +88,6 @@ const changeRaidState = async (req, res) => {
   }
 };
 
-// A diferencia del frontend (que afecta a TODOS los usuarios), esto solo
-// impacta a quienes quedaron asignados en la raid — el otro comportamiento
-// parece un bug del mock, vale la pena avisarle a tu compañero.
 async function applyRaidEndReliability(raid, result) {
   const userIds = raid.assignments.map(a => a.user);
   for (const userId of userIds) {
@@ -107,7 +103,6 @@ async function applyRaidEndReliability(raid, result) {
   }
 }
 
-// Fallómetro
 const addFailure = async (req, res) => {
   const { userId, type, severity } = req.body;
   try {
@@ -129,7 +124,6 @@ const addFailure = async (req, res) => {
   }
 };
 
-// Espejo de HallOfShame.jsx
 const getRankings = async (req, res) => {
   try {
     const users = await User.find().sort({ reliability: -1 });
@@ -141,4 +135,45 @@ const getRankings = async (req, res) => {
   }
 };
 
-module.exports = { getRaids, createRaid, changeRaidState, addFailure, getRankings };
+// Check-in: el jugador confirma que sí va a estar en la raid ya lockeada
+const checkIn = async (req, res) => {
+  try {
+    const raid = await Raid.findById(req.params.id);
+    if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
+    if (!['Locked', 'InProgress'].includes(raid.state)) {
+      return res.status(400).json({ message: 'Solo puedes hacer check-in cuando la raid está Locked o InProgress' });
+    }
+    const assignment = raid.assignments.find(a => String(a.user) === String(req.user._id));
+    if (!assignment) return res.status(404).json({ message: 'No estás asignado a esta raid' });
+
+    assignment.attendance = 'Confirmed';
+    await raid.save();
+    res.json({ message: 'Check-in registrado', assignment });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// Checkout: el jugador avisa que no va a poder ir
+const checkOut = async (req, res) => {
+  try {
+    const raid = await Raid.findById(req.params.id);
+    if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
+    const assignment = raid.assignments.find(a => String(a.user) === String(req.user._id));
+    if (!assignment) return res.status(404).json({ message: 'No estás asignado a esta raid' });
+
+    assignment.attendance = 'Declined';
+    await raid.save();
+
+    // Si se baja después de lockeada, cuenta como fallo leve de compromiso
+    if (raid.state === 'Locked') {
+      await Failure.create({ user: req.user._id, raid: raid._id, type: 'Checkout tardío', severity: 3 });
+    }
+
+    res.json({ message: 'Checkout registrado', assignment });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+module.exports = { getRaids, createRaid, changeRaidState, addFailure, getRankings, checkIn, checkOut };

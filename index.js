@@ -1,8 +1,10 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const swaggerUi = require('swagger-ui-express');
 require('dotenv').config();
 
+const swaggerSpec = require('./config/swagger');
 const authRoutes = require('./routes/authRoutes');
 const raidRoutes = require('./routes/raidRoutes');
 const clanRoutes = require('./routes/clanRoutes');
@@ -11,9 +13,12 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
 app.use('/api/auth', authRoutes);
 app.use('/api/raids', raidRoutes);
 app.use('/api/clans', clanRoutes);
+
 app.get('/', (req, res) => {
   res.send('Servidor de RaidPlanner funcionando correctamente');
 });
