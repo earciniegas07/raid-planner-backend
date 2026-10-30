@@ -52,5 +52,6 @@ router.post('/register', authController.register);
  *         description: Credenciales inválidas
  */
 router.post('/login', authController.login);
-
+const { protect } = require('../middleware/authMiddleware');
+router.get('/me', protect, authController.me);
 module.exports = router;

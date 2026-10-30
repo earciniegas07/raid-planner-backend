@@ -1,82 +1,48 @@
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
+const generateToken = require('../utils/generateToken');
+const handleError = require('../utils/handleError');
 
-// Clave secreta con respaldo si no la lee del .env
-const JWT_SECRET = process.env.JWT_SECRET || 'secreto_super_seguro_123';
+const publicUser = (u) => ({
+  id: u._id, username: u.username, email: u.email, gamertag: u.gamertag,
+  class: u.class, region: u.region, level: u.level, role: u.role,
+  reliability: u.reliability, clanId: u.clanId,
+});
 
-// Registro de Usuario
 exports.register = async (req, res) => {
   try {
     const { username, email, password, gamertag, class: userClass, region, level } = req.body;
-
-    // Verificar si el usuario o email ya existe
-    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
-    if (existingUser) {
-      return res.status(400).json({ message: 'El usuario ya existe' });
+    if (!username || !email || !password || !gamertag || !userClass) {
+      return res.status(400).json({ message: 'Faltan campos obligatorios' });
     }
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    const existing = await User.findOne({ $or: [{ email }, { username }] });
+    if (existing) return res.status(400).json({ message: 'El usuario o email ya existe' });
 
-    // Encriptar la contraseña
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Crear y guardar el usuario
-    const newUser = new User({
-      username, email, password: hashedPassword,
-      gamertag, class: userClass, region, level
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await User.create({
+      username, email, password: hashed, gamertag, class: userClass, region, level,
     });
-
-    await newUser.save();
-
-    // Generar Token JWT
-    const token = jwt.sign({ id: newUser._id }, JWT_SECRET, { expiresIn: '1d' });
-
-    res.status(201).json({
-      message: 'Usuario registrado con éxito 🎉',
-      token,
-      user: {
-        id: newUser._id,
-        username: newUser.username,
-        email: newUser.email
-      }
-    });
+    res.status(201).json({ message: 'Usuario registrado', token: generateToken(user._id), user: publicUser(user) });
   } catch (error) {
-    console.error('Error en register:', error);
-    res.status(500).json({ message: 'Error interno del servidor' });
+    handleError(res, error);
   }
 };
 
-// Login de Usuario
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    // Buscar el usuario por email
+    if (!email || !password) return res.status(400).json({ message: 'Email y contraseña son obligatorios' });
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ message: 'Credenciales inválidas.' });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(400).json({ message: 'Credenciales inválidas' });
     }
-
-    // Validar la contraseña
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ message: 'Credenciales inválidas.' });
-    }
-
-    // Generar Token JWT usando la constante JWT_SECRET
-    const token = jwt.sign({ id: user._id }, JWT_SECRET, { expiresIn: '1d' });
-
-    res.json({
-      message: 'Inicio de sesión exitoso 🚀',
-      token,
-      user: {
-        id: user._id,
-        username: user.username,
-        email: user.email
-      }
-    });
+    res.json({ message: 'Inicio de sesión exitoso', token: generateToken(user._id), user: publicUser(user) });
   } catch (error) {
-    console.error('Error en login:', error);
-    res.status(500).json({ message: 'Error interno del servidor' });
+    handleError(res, error);
   }
 };
+
+exports.me = (req, res) => res.json(publicUser(req.user));
