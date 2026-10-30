@@ -1,7 +1,20 @@
 const express = require('express');
-const { getRaids, createRaid, changeRaidState, addFailure, getRankings, checkIn, checkOut } = require('../controllers/raidController');
-const { protect } = require('../middleware/authMiddleware');
+const { 
+  getRaids, 
+  createRaid, 
+  updateRaid, 
+  deleteRaid, 
+  overrideAssignment, 
+  changeRaidState, 
+  addFailure, 
+  getRankings, 
+  checkIn, 
+  checkOut 
+} = require('../controllers/raidController');
+const { protect, authorize } = require('../middleware/authMiddleware');
 const router = express.Router();
+
+const ADMIN = ['Raid Leader', 'Officer'];
 
 /**
  * @swagger
@@ -34,7 +47,46 @@ const router = express.Router();
  *       201:
  *         description: Raid creada
  */
-router.route('/').get(getRaids).post(protect, createRaid);
+router.route('/').get(getRaids).post(protect, authorize(...ADMIN), createRaid);
+
+/**
+ * @swagger
+ * /api/raids/{id}:
+ *   put:
+ *     summary: Actualiza una raid en estado Planning
+ *     tags: [Raids]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *   delete:
+ *     summary: Elimina una raid en estado Planning
+ *     tags: [Raids]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ */
+router.route('/:id')
+  .put(protect, authorize(...ADMIN), updateRaid)
+  .delete(protect, authorize(...ADMIN), deleteRaid);
+
+/**
+ * @swagger
+ * /api/raids/{id}/assignments/{userId}:
+ *   patch:
+ *     summary: Reasigna manualmente el rol táctico de un jugador en la raid
+ *     tags: [Raids]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.patch('/:id/assignments/:userId', protect, authorize(...ADMIN), overrideAssignment);
 
 /**
  * @swagger
@@ -92,7 +144,7 @@ router.patch('/:id/state', protect, changeRaidState);
  *       201:
  *         description: Fallo registrado
  */
-router.post('/:id/failures', protect, addFailure);
+router.post('/:id/failures', protect, authorize(...ADMIN), addFailure);
 
 /**
  * @swagger

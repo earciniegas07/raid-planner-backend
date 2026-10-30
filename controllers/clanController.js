@@ -2,23 +2,54 @@ const Clan = require('../models/Clan');
 const User = require('../models/User');
 const Raid = require('../models/Raid');
 const Failure = require('../models/Failure');
+const handleError = require('../utils/handleError');
 
 const getClans = async (req, res) => {
   try {
     const clans = await Clan.find();
     res.json(clans);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
 const createClan = async (req, res) => {
-  const { name, faction, description, banner, roleLimits } = req.body;
   try {
+    const { name, faction, description, banner, roleLimits } = req.body;
     const clan = await Clan.create({ name, faction, description, banner, roleLimits });
     res.status(201).json(clan);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
+  }
+};
+
+const updateClan = async (req, res) => {
+  try {
+    const { name, faction, description, banner, roleLimits } = req.body;
+    const clan = await Clan.findByIdAndUpdate(
+      req.params.id,
+      { name, faction, description, banner, roleLimits },
+      { new: true, runValidators: true }
+    );
+    if (!clan) return res.status(404).json({ message: 'Clan no encontrado' });
+    res.json(clan);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+const deleteClan = async (req, res) => {
+  try {
+    const clan = await Clan.findById(req.params.id);
+    if (!clan) return res.status(404).json({ message: 'Clan no encontrado' });
+    if (await Raid.countDocuments({ clanId: clan._id }) > 0) {
+      return res.status(400).json({ message: 'No se puede eliminar un clan con raids asociadas' });
+    }
+    await User.updateMany({ clanId: clan._id }, { clanId: null });
+    await clan.deleteOne();
+    res.json({ message: 'Clan eliminado' });
+  } catch (error) {
+    handleError(res, error);
   }
 };
 
@@ -39,7 +70,7 @@ const joinClan = async (req, res) => {
     await req.user.save();
     res.json({ message: 'Te uniste al clan', user: req.user });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
@@ -105,8 +136,8 @@ const getClanRankings = async (req, res) => {
 
     res.json({ hardCarry, benchWarmer, mechanicsPro });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
-module.exports = { getClans, createClan, joinClan, getClanRankings };
+module.exports = { getClans, createClan, updateClan, deleteClan, joinClan, getClanRankings };

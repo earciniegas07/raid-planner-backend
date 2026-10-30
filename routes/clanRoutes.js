@@ -1,7 +1,16 @@
 const express = require('express');
-const { getClans, createClan, joinClan, getClanRankings } = require('../controllers/clanController');
-const { protect } = require('../middleware/authMiddleware');
+const { 
+  getClans, 
+  createClan, 
+  updateClan, 
+  deleteClan, 
+  joinClan, 
+  getClanRankings 
+} = require('../controllers/clanController');
+const { protect, authorize } = require('../middleware/authMiddleware');
 const router = express.Router();
+
+const ADMIN = ['Raid Leader', 'Officer'];
 
 /**
  * @swagger
@@ -39,7 +48,35 @@ const router = express.Router();
  *       201:
  *         description: Clan creado
  */
-router.route('/').get(getClans).post(protect, createClan);
+router.route('/').get(getClans).post(protect, authorize(...ADMIN), createClan);
+
+/**
+ * @swagger
+ * /api/clans/{id}:
+ *   put:
+ *     summary: Actualiza un clan existente
+ *     tags: [Clanes]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *   delete:
+ *     summary: Elimina un clan si no tiene raids asociadas
+ *     tags: [Clanes]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ */
+router.route('/:id')
+  .put(protect, authorize(...ADMIN), updateClan)
+  .delete(protect, authorize('Raid Leader'), deleteClan);
 
 /**
  * @swagger

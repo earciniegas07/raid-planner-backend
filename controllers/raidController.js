@@ -1,6 +1,7 @@
 const Raid = require('../models/Raid');
 const User = require('../models/User');
 const Failure = require('../models/Failure');
+const handleError = require('../utils/handleError');
 
 function seniorityRank(user) {
   return (user.role === 'Officer' || user.role === 'Raid Leader') ? 0 : 1;
@@ -42,16 +43,66 @@ const getRaids = async (req, res) => {
       .populate('assignments.user', 'gamertag class reliability');
     res.json(raids);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
 const createRaid = async (req, res) => {
   try {
-    const raid = await Raid.create({ ...req.body, state: 'Planning' });
+    const raid = await Raid.create({ ...req.body, state: 'Planning', assignments: [] });
     res.status(201).json(raid);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
+  }
+};
+
+const updateRaid = async (req, res) => {
+  try {
+    const raid = await Raid.findById(req.params.id);
+    if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
+    if (raid.state !== 'Planning') {
+      return res.status(400).json({ message: 'Solo se pueden editar raids en Planning' });
+    }
+    ['name', 'difficulty', 'startTime', 'durationHours', 'minPlayers', 'maxPlayers', 'clanId', 'requiredRoles']
+      .forEach(k => { if (req.body[k] !== undefined) raid[k] = req.body[k]; });
+    await raid.save();
+    res.json(raid);
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+const deleteRaid = async (req, res) => {
+  try {
+    const raid = await Raid.findById(req.params.id);
+    if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
+    await Failure.deleteMany({ raid: raid._id });
+    await raid.deleteOne();
+    res.json({ message: 'Raid eliminada' });
+  } catch (error) {
+    handleError(res, error);
+  }
+};
+
+const overrideAssignment = async (req, res) => {
+  try {
+    const { tacticalRole } = req.body;
+    if (!['Tank', 'Healer', 'DPS', 'Support', 'Bench'].includes(tacticalRole)) {
+      return res.status(400).json({ message: 'Rol táctico inválido' });
+    }
+    const raid = await Raid.findById(req.params.id);
+    if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
+    if (!['Locked', 'InProgress'].includes(raid.state)) {
+      return res.status(400).json({ message: 'Solo se puede reasignar en raids Locked o InProgress' });
+    }
+    const assignment = raid.assignments.find(a => String(a.user) === req.params.userId);
+    if (!assignment) return res.status(404).json({ message: 'Jugador no asignado a esta raid' });
+    assignment.tacticalRole = tacticalRole;
+    assignment.source = 'manual';
+    await raid.save();
+    res.json(assignment);
+  } catch (error) {
+    handleError(res, error);
   }
 };
 
@@ -84,7 +135,7 @@ const changeRaidState = async (req, res) => {
     await raid.save();
     res.json(raid);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
@@ -106,21 +157,27 @@ async function applyRaidEndReliability(raid, result) {
 const addFailure = async (req, res) => {
   const { userId, type, severity } = req.body;
   try {
-    await Failure.create({ user: userId, raid: req.params.id, type, severity });
-
-    const failures = await Failure.find({ user: userId, raid: req.params.id });
+    if (!userId || !type || ![1, 3, 5].includes(Number(severity))) {
+      return res.status(400).json({ message: 'userId, type y severity (1, 3 o 5) son obligatorios' });
+    }
+    const raid = await Raid.findById(req.params.id);
+    if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
+    if (raid.state === 'Planning') {
+      return res.status(400).json({ message: 'No se puede registrar un fallo en una raid en Planning' });
+    }
+    const user = await User.findById(userId);
+    if (!user) return res.status(404).json({ message: 'Jugador no encontrado' });
+    await Failure.create({ user: userId, raid: raid._id, type, severity: Number(severity) });
+    const failures = await Failure.find({ user: userId, raid: raid._id });
     const total = failures.reduce((sum, f) => sum + f.severity, 0);
-
     if (total >= 8) {
-      const user = await User.findById(userId);
       user.role = 'Bench';
       user.reliability = Math.max(0, user.reliability - 10);
       await user.save();
     }
-
     res.status(201).json({ message: 'Fallo registrado' });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
@@ -131,7 +188,7 @@ const getRankings = async (req, res) => {
       .populate('user', 'gamertag');
     res.json({ mostReliable: users, recentFailures: failures });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
@@ -150,7 +207,7 @@ const checkIn = async (req, res) => {
     await raid.save();
     res.json({ message: 'Check-in registrado', assignment });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
@@ -172,8 +229,19 @@ const checkOut = async (req, res) => {
 
     res.json({ message: 'Checkout registrado', assignment });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    handleError(res, error);
   }
 };
 
-module.exports = { getRaids, createRaid, changeRaidState, addFailure, getRankings, checkIn, checkOut };
+module.exports = {
+  getRaids,
+  createRaid,
+  updateRaid,
+  deleteRaid,
+  overrideAssignment,
+  changeRaidState,
+  addFailure,
+  getRankings,
+  checkIn,
+  checkOut,
+};

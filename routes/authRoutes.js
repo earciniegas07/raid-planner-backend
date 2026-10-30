@@ -53,5 +53,21 @@ router.post('/register', authController.register);
  */
 router.post('/login', authController.login);
 const { protect } = require('../middleware/authMiddleware');
+
+/**
+ * @swagger
+ * /api/auth/me:
+ *   get:
+ *     summary: Devuelve el usuario autenticado a partir del token
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Datos del usuario autenticado
+ *       401:
+ *         description: Token ausente o inválido
+ */
+
 router.get('/me', protect, authController.me);
 module.exports = router;
