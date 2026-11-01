@@ -15,5 +15,5 @@ const raidSchema = new mongoose.Schema({
     source: { type: String, enum: ['auto', 'manual'], default: 'auto' },
     attendance: { type: String, enum: ['Pending', 'Confirmed', 'Declined'], default: 'Pending' }
   }]
-}, { timestamps: true });
+}, { timestamps: true, toJSON: { flattenMaps: true } });
 module.exports = mongoose.model('Raid', raidSchema);

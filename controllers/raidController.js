@@ -1,46 +1,28 @@
 const Raid = require('../models/Raid');
+const Clan = require('../models/Clan');
 const User = require('../models/User');
 const Failure = require('../models/Failure');
 const handleError = require('../utils/handleError');
+const { assignRolesForRaid } = require('../utils/assignRoles');
 
-function seniorityRank(user) {
-  return (user.role === 'Officer' || user.role === 'Raid Leader') ? 0 : 1;
-}
+const ADMIN_ROLES = ['Raid Leader', 'Officer'];
+const RAID_FIELDS = ['name', 'difficulty', 'startTime', 'durationHours', 'minPlayers', 'maxPlayers', 'clanId', 'requiredRoles'];
 
-async function assignRolesForRaid(raid) {
-  const pool = await User.find({ clanId: raid.clanId, role: { $ne: 'Bench' } });
-  const required = raid.requiredRoles instanceof Map ? raid.requiredRoles : new Map(Object.entries(raid.requiredRoles || {}));
-  const assignments = [];
-  const usedIds = new Set();
+// Solo deja pasar los campos permitidos (evita mass assignment de state/assignments)
+const pickRaidFields = (body) =>
+  RAID_FIELDS.reduce((acc, k) => {
+    if (body[k] !== undefined) acc[k] = body[k];
+    return acc;
+  }, {});
 
-  for (const [tacticalRole, count] of required.entries()) {
-    const candidates = pool
-      .filter(u => u.class === tacticalRole && !usedIds.has(String(u._id)))
-      .sort((a, b) => {
-        const diff = seniorityRank(a) - seniorityRank(b);
-        return diff !== 0 ? diff : b.level - a.level;
-      });
-
-    candidates.slice(0, count).forEach(u => {
-      assignments.push({ user: u._id, tacticalRole, source: 'auto' });
-      usedIds.add(String(u._id));
-    });
-  }
-
-  pool.forEach(u => {
-    if (!usedIds.has(String(u._id))) {
-      assignments.push({ user: u._id, tacticalRole: 'Bench', source: 'auto' });
-    }
-  });
-
-  return assignments;
-}
+const populateRaid = (query) =>
+  query
+    .populate('clanId', 'name faction')
+    .populate('assignments.user', 'gamertag class reliability');
 
 const getRaids = async (req, res) => {
   try {
-    const raids = await Raid.find()
-      .populate('clanId', 'name faction')
-      .populate('assignments.user', 'gamertag class reliability');
+    const raids = await populateRaid(Raid.find().sort({ startTime: 1 }));
     res.json(raids);
   } catch (error) {
     handleError(res, error);
@@ -49,8 +31,15 @@ const getRaids = async (req, res) => {
 
 const createRaid = async (req, res) => {
   try {
-    const raid = await Raid.create({ ...req.body, state: 'Planning', assignments: [] });
-    res.status(201).json(raid);
+    const data = pickRaidFields(req.body);
+    if (Number(data.minPlayers) > Number(data.maxPlayers)) {
+      return res.status(400).json({ message: 'El mínimo de jugadores no puede superar al máximo' });
+    }
+    if (!data.clanId || !(await Clan.exists({ _id: data.clanId }))) {
+      return res.status(400).json({ message: 'Debes elegir un clan válido' });
+    }
+    const raid = await Raid.create({ ...data, state: 'Planning', assignments: [] });
+    res.status(201).json(await populateRaid(Raid.findById(raid._id)));
   } catch (error) {
     handleError(res, error);
   }
@@ -63,10 +52,16 @@ const updateRaid = async (req, res) => {
     if (raid.state !== 'Planning') {
       return res.status(400).json({ message: 'Solo se pueden editar raids en Planning' });
     }
-    ['name', 'difficulty', 'startTime', 'durationHours', 'minPlayers', 'maxPlayers', 'clanId', 'requiredRoles']
-      .forEach(k => { if (req.body[k] !== undefined) raid[k] = req.body[k]; });
+    const data = pickRaidFields(req.body);
+    Object.keys(data).forEach(k => { raid[k] = data[k]; });
+    if (raid.minPlayers > raid.maxPlayers) {
+      return res.status(400).json({ message: 'El mínimo de jugadores no puede superar al máximo' });
+    }
+    if (data.clanId && !(await Clan.exists({ _id: data.clanId }))) {
+      return res.status(400).json({ message: 'Clan no válido' });
+    }
     await raid.save();
-    res.json(raid);
+    res.json(await populateRaid(Raid.findById(raid._id)));
   } catch (error) {
     handleError(res, error);
   }
@@ -113,14 +108,18 @@ const changeRaidState = async (req, res) => {
     if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
 
     const userRole = req.user.role;
+    const isAdmin = ADMIN_ROLES.includes(userRole);
 
     if (raid.state === 'Planning' && newState === 'Locked') {
-      if (userRole !== 'Raid Leader' && userRole !== 'Officer') {
+      if (!isAdmin) {
         return res.status(403).json({ message: 'Solo Raid Leader u Officer pueden lockear la raid' });
       }
       raid.assignments = await assignRolesForRaid(raid);
       raid.state = newState;
     } else if (raid.state === 'Locked' && newState === 'InProgress') {
+      if (!isAdmin) {
+        return res.status(403).json({ message: 'Solo Raid Leader u Officer pueden iniciar la raid' });
+      }
       raid.state = newState;
     } else if (raid.state === 'InProgress' && (newState === 'Completed' || newState === 'Failed')) {
       if (userRole !== 'Raid Leader') {
@@ -133,7 +132,7 @@ const changeRaidState = async (req, res) => {
     }
 
     await raid.save();
-    res.json(raid);
+    res.json(await populateRaid(Raid.findById(raid._id)));
   } catch (error) {
     handleError(res, error);
   }
@@ -165,6 +164,9 @@ const addFailure = async (req, res) => {
     if (raid.state === 'Planning') {
       return res.status(400).json({ message: 'No se puede registrar un fallo en una raid en Planning' });
     }
+    if (!raid.assignments.some(a => String(a.user) === String(userId))) {
+      return res.status(400).json({ message: 'Ese jugador no está asignado a esta raid' });
+    }
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: 'Jugador no encontrado' });
     await Failure.create({ user: userId, raid: raid._id, type, severity: Number(severity) });
@@ -175,7 +177,7 @@ const addFailure = async (req, res) => {
       user.reliability = Math.max(0, user.reliability - 10);
       await user.save();
     }
-    res.status(201).json({ message: 'Fallo registrado' });
+    res.status(201).json({ message: 'Fallo registrado', benched: total >= 8 });
   } catch (error) {
     handleError(res, error);
   }
@@ -183,9 +185,10 @@ const addFailure = async (req, res) => {
 
 const getRankings = async (req, res) => {
   try {
-    const users = await User.find().sort({ reliability: -1 });
+    const users = await User.find().select('-password').sort({ reliability: -1 });
     const failures = await Failure.find().sort({ createdAt: -1 }).limit(10)
-      .populate('user', 'gamertag');
+      .populate('user', 'gamertag')
+      .populate('raid', 'name');
     res.json({ mostReliable: users, recentFailures: failures });
   } catch (error) {
     handleError(res, error);
@@ -216,8 +219,14 @@ const checkOut = async (req, res) => {
   try {
     const raid = await Raid.findById(req.params.id);
     if (!raid) return res.status(404).json({ message: 'Raid no encontrada' });
+    if (!['Locked', 'InProgress'].includes(raid.state)) {
+      return res.status(400).json({ message: 'Solo puedes hacer checkout cuando la raid está Locked o InProgress' });
+    }
     const assignment = raid.assignments.find(a => String(a.user) === String(req.user._id));
     if (!assignment) return res.status(404).json({ message: 'No estás asignado a esta raid' });
+    if (assignment.attendance === 'Declined') {
+      return res.status(400).json({ message: 'Ya habías hecho checkout en esta raid' });
+    }
 
     assignment.attendance = 'Declined';
     await raid.save();

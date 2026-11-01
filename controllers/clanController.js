@@ -81,7 +81,7 @@ const getClanRankings = async (req, res) => {
     const clan = await Clan.findById(clanId);
     if (!clan) return res.status(404).json({ message: 'Clan no encontrado' });
 
-    const users = await User.find({ clanId });
+    const users = await User.find({ clanId }).select('-password');
     const raids = await Raid.find({ clanId });
 
     // Hard Carry: mayor reliability del clan
