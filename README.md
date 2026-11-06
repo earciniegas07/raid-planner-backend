@@ -5,10 +5,10 @@ API REST (Node.js, Express 5, MongoDB/Mongoose) para gestionar clanes, raids, as
 ## URLs públicas
 | Recurso | URL |
 |---|---|
-| API (Render) | `https://REEMPLAZAR-API.onrender.com` |
-| Documentación Swagger | `https://REEMPLAZAR-API.onrender.com/api-docs` |
+| API (Render) | `https://raid-planner-backend.onrender.com` |
+| Documentación Swagger | `https://raid-planner-backend.onrender.com/api-docs` |
 | Frontend (Vercel) | `https://REEMPLAZAR-FRONT.vercel.app` |
-| Repositorio frontend | `https://github.com/REEMPLAZAR/raid-planner` |
+| Repositorio frontend | `https://github.com/earciniegas07//raid-planner` |
 
 > Render (plan gratuito) duerme el servicio tras un rato sin uso: la primera petición puede tardar ~30 s.
 
